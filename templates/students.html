@@ -1,0 +1,109 @@
+{% extends 'base.html' %}
+{% block title %}Students{% endblock %}
+{% block page_title %}Student Management{% endblock %}
+
+{% block content %}
+<div style="display:flex;justify-content:flex-end;margin-bottom:20px">
+  <button class="btn btn-primary" onclick="document.getElementById('addModal').classList.add('open')">+ Add Student</button>
+</div>
+
+<div class="card">
+  <div class="card-title">All Students</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>ROLL NO</th><th>NAME</th><th>SECTION</th><th>EMAIL</th><th>FACE</th><th>ACTION</th></tr></thead>
+      <tbody id="studentTable">
+        <tr><td colspan="6" style="text-align:center;color:var(--muted);padding:40px"><span class="spinner"></span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Add Modal -->
+<div class="modal-overlay" id="addModal">
+  <div class="modal">
+    <div class="modal-title">Add New Student</div>
+    <div class="form-group">
+      <label class="form-label">Roll Number *</label>
+      <input class="form-input" id="rollNo" placeholder="e.g. CS2021001">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Full Name *</label>
+      <input class="form-input" id="fullName" placeholder="Student Name">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Section *</label>
+      <select class="form-select" id="section">
+        <option value="A">Section A</option>
+        <option value="B">Section B</option>
+        <option value="C">Section C</option>
+        <option value="D">Section D</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Email</label>
+      <input class="form-input" id="email" type="email" placeholder="student@college.edu">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Phone</label>
+      <input class="form-input" id="phone" placeholder="10-digit mobile">
+    </div>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" onclick="addStudent()">Add Student</button>
+      <button class="btn btn-ghost" onclick="document.getElementById('addModal').classList.remove('open')">Cancel</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadStudents() {
+  const students = await api('GET', '/api/students');
+  const tbody = document.getElementById('studentTable');
+  if(!students.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:40px">No students yet. Add one above.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = students.map(s => `
+    <tr>
+      <td><code style="font-family:var(--mono);font-size:12px">${s.roll_no}</code></td>
+      <td>${s.name}</td>
+      <td><span class="badge badge-blue">${s.section}</span></td>
+      <td style="color:var(--muted);font-size:12px">${s.email || '—'}</td>
+      <td>${s.has_face ? '<span class="badge badge-green">✓ Enrolled</span>' : '<span class="badge badge-orange">Pending</span>'}</td>
+      <td>
+        <button class="btn btn-ghost" style="padding:5px 10px;font-size:12px" onclick="deleteStudent(${s.id})">🗑</button>
+        ${!s.has_face ? `<a href="/enroll" class="btn btn-primary" style="padding:5px 10px;font-size:12px;text-decoration:none">Enroll</a>` : ''}
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function addStudent() {
+  const data = {
+    roll_no: document.getElementById('rollNo').value.trim(),
+    name: document.getElementById('fullName').value.trim(),
+    section: document.getElementById('section').value,
+    email: document.getElementById('email').value.trim(),
+    phone: document.getElementById('phone').value.trim()
+  };
+  if(!data.roll_no || !data.name) { toast('Roll No and Name are required', 'error'); return; }
+
+  const res = await api('POST', '/api/students', data);
+  if(res.error) { toast(res.error, 'error'); return; }
+  toast(`Student ${res.name} added`);
+  document.getElementById('addModal').classList.remove('open');
+  loadStudents();
+}
+
+async function deleteStudent(id) {
+  if(!confirm('Delete this student and all their data?')) return;
+  await api('DELETE', `/api/students/${id}`);
+  toast('Student deleted');
+  loadStudents();
+}
+
+loadStudents();
+</script>
+{% endblock %}

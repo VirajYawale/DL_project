@@ -1,0 +1,373 @@
+{% extends 'base.html' %}
+{% block title %}Take Attendance{% endblock %}
+{% block page_title %}Live Attendance{% endblock %}
+
+{% block head %}
+<style>
+  .attend-grid { display: grid; grid-template-columns: 1fr 380px; gap: 24px; }
+
+  /* ── Camera box ── */
+  .live-box {
+    position: relative;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #000;
+    aspect-ratio: 16/9;
+    border: 2px solid var(--border);
+  }
+  #videoFeed {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .feed-placeholder {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 10px; color: var(--muted);
+    background: #0a0e1a;
+    pointer-events: none;
+  }
+  .feed-placeholder .icon { font-size: 48px; opacity: 0.3; }
+  .feed-placeholder p { font-size: 13px; }
+
+  .spoof-alert {
+    position: absolute; top: 12px; left: 12px;
+    background: rgba(239,68,68,0.92);
+    color: #fff; padding: 6px 14px;
+    border-radius: 6px; font-size: 12px; font-weight: 700;
+    display: none;
+  }
+
+  /* ── Liveness ring ── */
+  .liveness-wrap {
+    display: flex; flex-direction: column;
+    align-items: center; padding: 20px 0 8px;
+  }
+  .liveness-ring-wrap { position: relative; width: 80px; height: 80px; }
+  .liveness-ring-wrap svg { transform: rotate(-90deg); }
+  .liveness-ring-bg  { fill: none; stroke: var(--border); stroke-width: 6; }
+  .liveness-ring-fill {
+    fill: none; stroke: var(--accent2); stroke-width: 6;
+    stroke-linecap: round;
+    stroke-dasharray: 220;
+    stroke-dashoffset: 220;
+    transition: stroke-dashoffset 0.4s ease, stroke 0.4s ease;
+  }
+  .liveness-ring-fill.passed { stroke: var(--green); stroke-dashoffset: 0; }
+  .liveness-count {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; font-weight: 700; font-family: var(--mono);
+    color: var(--accent2);
+  }
+  .liveness-count.passed { color: var(--green); }
+  .liveness-msg {
+    margin-top: 10px; font-size: 12px; color: var(--muted); text-align: center;
+  }
+  .liveness-msg.passed { color: var(--green); font-weight: 600; }
+  .liveness-chip {
+    margin-top: 6px; font-size: 11px; font-family: var(--mono);
+    padding: 3px 10px; border-radius: 20px;
+    background: var(--surface2); color: var(--muted);
+  }
+
+  /* ── Session bar ── */
+  .session-bar {
+    display: flex; align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px; background: var(--surface2);
+    border-radius: 8px; margin-bottom: 16px;
+  }
+  .session-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .session-dot.live { background: var(--green); animation: pulse 1.5s infinite; }
+  @keyframes pulse { 50% { opacity: 0.4; } }
+
+  /* ── Log entries ── */
+  .log-entry {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 14px; border-radius: 8px;
+    border: 1px solid var(--border); margin-bottom: 8px;
+    animation: fadeIn 0.3s ease;
+  }
+  .log-entry.new   { border-color: var(--green); background: rgba(16,185,129,0.08); }
+  .log-entry.spoof { border-color: var(--red);   background: rgba(239,68,68,0.08); }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
+  .log-roll { font-family: var(--mono); font-size: 13px; font-weight: 600; min-width: 80px; }
+  .log-time { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-left: auto; }
+  .conf-bar  { height: 4px; border-radius: 2px; background: var(--border); margin-top: 4px; }
+  .conf-fill { height: 100%; border-radius: 2px; background: var(--green); }
+
+  .counter-big {
+    font-size: 48px; font-weight: 700;
+    font-family: var(--mono); color: var(--accent); line-height: 1;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="attend-grid">
+
+  <!-- ══ Camera Panel ══ -->
+  <div>
+    <div class="session-bar">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="session-dot" id="sessionDot"></div>
+        <span style="font-size:13px;font-weight:600" id="sessionStatus">Session Inactive</span>
+      </div>
+      <div style="display:flex;gap:8px">
+        <select class="form-select" id="subjectSelect" style="width:auto;padding:8px 12px">
+          <option value="">Select Subject</option>
+          {% for sub in subjects %}
+          <option value="{{ sub.id }}">{{ sub.code }} — {{ sub.name }}</option>
+          {% endfor %}
+        </select>
+        <button class="btn btn-success" id="btnStart" onclick="startSession()">▶ Start</button>
+        <button class="btn btn-danger"  id="btnStop"  onclick="stopSession()" disabled>⏹ Stop</button>
+      </div>
+    </div>
+
+    <!-- Smooth MJPEG stream: single <img> — no JS frame polling -->
+    <div class="live-box">
+      <div class="feed-placeholder" id="feedPlaceholder">
+        <div class="icon">📷</div>
+        <p>Start a session to activate camera</p>
+      </div>
+      <img id="videoFeed" src="" alt="Live Camera Feed" style="display:none"/>
+      <div class="spoof-alert" id="spoofAlert">⚠ SPOOF DETECTED</div>
+    </div>
+
+    <div style="display:flex;gap:12px;margin-top:12px">
+      <div class="stat-card" style="flex:1;text-align:center">
+        <div class="counter-big" id="markedCount">0</div>
+        <div class="stat-label">Students Marked</div>
+      </div>
+      <div class="stat-card" style="flex:1;text-align:center">
+        <div class="counter-big" id="spoofCount" style="color:var(--red)">0</div>
+        <div class="stat-label">Spoof Attempts</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div class="card-title" style="margin:0">Today's Log</div>
+        <button class="btn btn-ghost" style="padding:6px 12px;font-size:12px" onclick="exportCSV()">⬇ Export CSV</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ROLL NO</th><th>NAME</th><th>SUBJECT</th><th>TIME</th><th>CONF</th></tr></thead>
+          <tbody id="logTable"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ Sidebar ══ -->
+  <div>
+    <!-- Liveness card -->
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">Anti-Spoof Liveness Check</div>
+      <div class="liveness-wrap">
+        <div class="liveness-ring-wrap">
+          <svg width="80" height="80" viewBox="0 0 80 80">
+            <circle class="liveness-ring-bg"   cx="40" cy="40" r="35"/>
+            <circle class="liveness-ring-fill" cx="40" cy="40" r="35" id="livenessRing"/>
+          </svg>
+          <div class="liveness-count" id="livenessCount">0</div>
+        </div>
+        <div class="liveness-chip" id="livenessChip">👁 Blink 0/2</div>
+        <div class="liveness-msg"  id="livenessMsg">
+          Start a session, then blink naturally to verify liveness
+        </div>
+      </div>
+      <div style="text-align:center;margin-top:8px">
+        <button class="btn btn-ghost" style="font-size:12px;padding:6px 14px" onclick="resetLiveness()">↺ Reset Liveness</button>
+      </div>
+    </div>
+
+    <!-- Live detection log -->
+    <div class="card">
+      <div class="card-title">Live Feed</div>
+      <div id="liveLog" style="max-height:440px;overflow-y:auto">
+        <div id="logPlaceholder" style="color:var(--muted);font-size:13px;text-align:center;padding:40px 0">
+          Start a session to see live detections
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let sessionActive = false;
+let livenessTimer = null;
+let pollTimer     = null;
+let seenRolls     = new Set();
+const LIVENESS_REQUIRED = 2;
+
+async function startSession() {
+  const subjectId = document.getElementById('subjectSelect').value;
+  if (!subjectId) { toast('Please select a subject', 'error'); return; }
+
+  updateLivenessUI({ blink_count: 0, required: LIVENESS_REQUIRED, passed: false });
+
+  await api('POST', '/api/attendance/start', { subject_id: parseInt(subjectId) });
+
+  // ── Attach MJPEG stream — single src swap, server does all the work ──
+  const img = document.getElementById('videoFeed');
+  img.src = '/video_feed?' + Date.now();
+  img.style.display = 'block';
+  document.getElementById('feedPlaceholder').style.display = 'none';
+
+  sessionActive = true;
+  document.getElementById('sessionDot').classList.add('live');
+  document.getElementById('sessionStatus').textContent = 'Session Active';
+  document.getElementById('btnStart').disabled = true;
+  document.getElementById('btnStop').disabled  = false;
+  document.getElementById('subjectSelect').disabled = true;
+
+  livenessTimer = setInterval(pollLiveness,    700);
+  pollTimer     = setInterval(pollAttendance, 3000);
+  toast('Session started — smooth camera stream active');
+}
+
+async function stopSession() {
+  clearInterval(livenessTimer);
+  clearInterval(pollTimer);
+  sessionActive = false;
+
+  // Kill MJPEG stream instantly
+  const img = document.getElementById('videoFeed');
+  img.src = '';
+  img.style.display = 'none';
+  document.getElementById('feedPlaceholder').style.display = 'flex';
+  document.getElementById('spoofAlert').style.display = 'none';
+
+  const result = await api('POST', '/api/attendance/stop', {});
+  document.getElementById('sessionDot').classList.remove('live');
+  document.getElementById('sessionStatus').textContent = 'Session Ended';
+  document.getElementById('btnStart').disabled = false;
+  document.getElementById('btnStop').disabled  = true;
+  document.getElementById('subjectSelect').disabled = false;
+
+  toast(`Session ended — ${result.summary?.marked_count || 0} students marked.`);
+  loadTodayLog();
+}
+
+// ── Liveness polling ──
+async function pollLiveness() {
+  try {
+    const d = await (await fetch('/api/liveness/status')).json();
+    updateLivenessUI(d);
+  } catch(e) {}
+}
+
+function updateLivenessUI(d) {
+  const circum = 2 * Math.PI * 35;
+  const pct    = Math.min(d.blink_count / (d.required || LIVENESS_REQUIRED), 1);
+  const ring   = document.getElementById('livenessRing');
+  const count  = document.getElementById('livenessCount');
+  const chip   = document.getElementById('livenessChip');
+  const msg    = document.getElementById('livenessMsg');
+
+  ring.style.strokeDasharray  = circum;
+  ring.style.strokeDashoffset = circum * (1 - pct);
+
+  count.textContent = d.blink_count;
+
+  if (d.passed) {
+    ring.classList.add('passed');
+    count.classList.add('passed');
+    chip.textContent = '✅ Liveness Verified';
+    chip.style.color = 'var(--green)';
+    msg.textContent  = 'Real person confirmed — attendance running';
+    msg.className    = 'liveness-msg passed';
+  } else {
+    ring.classList.remove('passed');
+    count.classList.remove('passed');
+    chip.textContent = `👁 Blink ${d.blink_count}/${d.required || LIVENESS_REQUIRED}`;
+    chip.style.color = '';
+    msg.textContent  = 'Look at the camera and blink naturally to verify liveness';
+    msg.className    = 'liveness-msg';
+  }
+}
+
+async function resetLiveness() {
+  await api('POST', '/api/liveness/reset', {});
+  updateLivenessUI({ blink_count: 0, required: LIVENESS_REQUIRED, passed: false });
+  toast('Liveness reset');
+}
+
+// ── Attendance polling ──
+async function pollAttendance() {
+  const subjectId = document.getElementById('subjectSelect').value;
+  if (!subjectId || !sessionActive) return;
+  try {
+    const data = await api('GET', `/api/attendance/log?subject_id=${subjectId}`);
+    appendNewLogEntries(data);
+    document.getElementById('markedCount').textContent = data.length;
+  } catch(e) {}
+}
+
+function appendNewLogEntries(records) {
+  const logDiv = document.getElementById('liveLog');
+  for (const r of records) {
+    if (seenRolls.has(r.roll_no)) continue;
+    seenRolls.add(r.roll_no);
+
+    const placeholder = document.getElementById('logPlaceholder');
+    if (placeholder) placeholder.remove();
+
+    const conf = Math.round((r.confidence || 0) * 100);
+    const entry = document.createElement('div');
+    entry.className = 'log-entry new';
+    entry.innerHTML = `
+      <div style="font-size:20px">✅</div>
+      <div style="flex:1">
+        <div class="log-roll">${r.roll_no}</div>
+        <div style="font-size:12px;color:var(--text)">${r.name}</div>
+        <div class="conf-bar"><div class="conf-fill" style="width:${conf}%"></div></div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${r.method || 'ArcFace'}</div>
+      </div>
+      <div class="log-time">${r.time}</div>
+    `;
+    logDiv.prepend(entry);
+    if (logDiv.children.length > 30) logDiv.lastChild.remove();
+  }
+}
+
+async function loadTodayLog() {
+  const subjectId = document.getElementById('subjectSelect').value;
+  if (!subjectId) return;
+  const data = await api('GET', `/api/attendance/log?subject_id=${subjectId}`);
+  const tbody = document.getElementById('logTable');
+  tbody.innerHTML = data.map(r => `
+    <tr>
+      <td><code style="font-family:var(--mono)">${r.roll_no}</code></td>
+      <td>${r.name}</td>
+      <td>${r.subject}</td>
+      <td><code style="font-family:var(--mono)">${r.time}</code></td>
+      <td><span class="badge badge-green">${Math.round((r.confidence||0)*100)}%</span></td>
+    </tr>
+  `).join('');
+}
+
+function exportCSV() {
+  const rows = document.querySelectorAll('#logTable tr');
+  let csv = 'Roll No,Name,Subject,Time,Confidence\n';
+  rows.forEach(row => {
+    const cells = [...row.querySelectorAll('td')].map(c => c.textContent.trim());
+    csv += cells.join(',') + '\n';
+  });
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `attendance_${new Date().toISOString().split('T')[0]}.csv`;
+  a.click();
+}
+
+document.getElementById('subjectSelect').addEventListener('change', loadTodayLog);
+</script>
+{% endblock %}

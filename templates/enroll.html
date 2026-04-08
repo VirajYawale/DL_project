@@ -1,0 +1,493 @@
+{% extends 'base.html' %}
+{% block title %}Enroll Student{% endblock %}
+{% block page_title %}Face Enrollment & Model Training{% endblock %}
+
+{% block head %}
+<style>
+  .enroll-grid { display: grid; grid-template-columns: 440px 1fr; gap: 24px; align-items: start; }
+
+  .video-box {
+    position: relative; border-radius: 14px; overflow: hidden;
+    background: #000; aspect-ratio: 4/3; border: 2px solid var(--border);
+    transition: border-color 0.3s, box-shadow 0.3s;
+  }
+  .video-box.recording {
+    border-color: var(--red);
+    box-shadow: 0 0 0 5px rgba(239,68,68,0.18);
+    animation: rec-pulse 1.4s ease infinite;
+  }
+  @keyframes rec-pulse { 50% { box-shadow: 0 0 0 9px rgba(239,68,68,0.05); } }
+  video, canvas { width:100%; height:100%; object-fit:cover; position:absolute; top:0; left:0; }
+
+  .face-guide {
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-53%);
+    width:155px; height:205px;
+    border: 2.5px dashed rgba(59,130,246,0.5);
+    border-radius: 50%; pointer-events:none;
+  }
+  .rec-badge {
+    position:absolute; top:10px; left:10px;
+    background:rgba(239,68,68,0.90); color:#fff;
+    font-size:11px; font-weight:700; padding:4px 10px;
+    border-radius:20px; display:none; align-items:center; gap:6px;
+  }
+  .rec-dot { width:7px; height:7px; border-radius:50%; background:#fff; animation:blink 0.85s infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+  .timer-bar { position:absolute; bottom:0; left:0; right:0; height:5px; background:rgba(255,255,255,0.07); }
+  .timer-fill { height:100%; background:linear-gradient(90deg,var(--accent),var(--accent2)); width:0%; transition:width 0.12s; }
+  .timer-label { position:absolute; bottom:9px; right:10px; font-family:var(--mono); font-size:12px; color:rgba(255,255,255,0.65); }
+
+  .multi-select { display:flex; flex-wrap:wrap; gap:8px; }
+  .subj-chip {
+    padding:6px 14px; border-radius:20px; border:1px solid var(--border);
+    font-size:13px; cursor:pointer; background:var(--surface2);
+    transition:all 0.15s; user-select:none;
+  }
+  .subj-chip.selected { border-color:var(--accent); background:rgba(59,130,246,0.13); color:var(--accent); }
+
+  .frame-strip { display:flex; gap:5px; flex-wrap:wrap; margin-top:10px; }
+  .frame-thumb {
+    width:52px; height:40px; object-fit:cover;
+    border-radius:6px; border:1.5px solid var(--border);
+    transition:transform 0.12s;
+  }
+  .frame-thumb:hover { transform:scale(1.18); }
+  .frame-thumb.best { border-color:var(--green); }
+
+  .quality-track { height:8px; background:var(--border); border-radius:4px; overflow:hidden; margin-top:8px; }
+  .quality-fill { height:100%; border-radius:4px; background:var(--green); width:0%; transition:width 0.5s; }
+
+  /* Training pipeline */
+  .pipeline { display:flex; flex-direction:column; gap:0; }
+  .pipe-step {
+    display:flex; align-items:flex-start; gap:14px;
+    padding:12px 0 12px 20px;
+    border-left:2px solid var(--border);
+    position:relative;
+  }
+  .pipe-step:last-child { border-left-color:transparent; }
+  .pipe-dot {
+    position:absolute; left:-7px; top:15px;
+    width:12px; height:12px; border-radius:50%;
+    background:var(--surface2); border:2px solid var(--border);
+    transition:all 0.3s; flex-shrink:0;
+  }
+  .pipe-step.active .pipe-dot { background:var(--accent); border-color:var(--accent); animation:pdot 0.9s infinite; }
+  .pipe-step.done .pipe-dot { background:var(--green); border-color:var(--green); }
+  .pipe-step.err .pipe-dot { background:var(--red); border-color:var(--red); }
+  @keyframes pdot { 50% { transform: scale(1.4); } }
+  .pipe-title { font-size:13px; font-weight:600; }
+  .pipe-sub { font-size:11px; color:var(--muted); margin-top:3px; line-height:1.5; }
+
+  .aug-pills { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
+  .aug-pill {
+    font-size:10px; padding:3px 9px; border-radius:12px;
+    background:rgba(6,182,212,0.10); border:1px solid rgba(6,182,212,0.22);
+    color:var(--accent2); font-family:var(--mono);
+  }
+
+  .metric-row { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
+  .metric { flex:1; min-width:80px; text-align:center; }
+  .metric .v { font-size:26px; font-weight:700; font-family:var(--mono); color:var(--accent); }
+  .metric .l { font-size:11px; color:var(--muted); margin-top:2px; }
+
+  .step-list { counter-reset:s; }
+  .step { counter-increment:s; display:flex; gap:10px; margin-bottom:12px; font-size:13px; align-items:flex-start; }
+  .step::before {
+    content:counter(s); min-width:22px; height:22px;
+    background:var(--accent); border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    font-size:10px; font-weight:700; flex-shrink:0; margin-top:1px;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="enroll-grid">
+
+  <!-- Camera Panel -->
+  <div>
+    <div class="card" style="padding:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div class="card-title" style="margin:0">Live Camera</div>
+        <code id="timerDisplay" style="font-family:var(--mono);font-size:13px;color:var(--muted)">0.0s</code>
+      </div>
+
+      <div class="video-box" id="videoBox">
+        <video id="liveVideo" autoplay muted playsinline></video>
+        <canvas id="overlayCanvas"></canvas>
+        <div class="face-guide"></div>
+        <div class="rec-badge" id="recBadge"><span class="rec-dot"></span> REC</div>
+        <div class="timer-bar"><div class="timer-fill" id="timerFill"></div></div>
+        <div class="timer-label" id="timerFloat"></div>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+        <button class="btn btn-ghost" id="btnCamera" onclick="startCamera()">📷 Camera</button>
+        <button class="btn btn-primary" id="btnRecord" onclick="startRecording()" disabled>⏺ Record</button>
+        <button class="btn btn-danger"  id="btnStop"   onclick="stopRecording()"  disabled>⏹ Stop</button>
+        <button class="btn btn-ghost"   id="btnRetake" onclick="retake()" style="display:none">↩ Retake</button>
+      </div>
+
+      <div id="previewArea" style="display:none;margin-top:14px">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:6px">
+          Sampled Frames <span id="frameCountLabel" style="color:var(--text);font-weight:600"></span>
+          <span style="color:var(--muted)"> — green border = high quality</span>
+        </div>
+        <div class="frame-strip" id="frameThumbs"></div>
+        <div style="font-size:12px;color:var(--muted);margin-top:10px">Frame Quality Score</div>
+        <div class="quality-track"><div class="quality-fill" id="qualityFill"></div></div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px" id="qualityText"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Recording Tips</div>
+      <div class="step-list">
+        <div class="step"><div><b>Face inside the oval.</b> ~50cm from camera. Look straight.</div></div>
+        <div class="step"><div><b>Slowly turn 15°</b> left, then right during recording for multi-angle coverage.</div></div>
+        <div class="step"><div><b>Glasses OK.</b> Good frontal light. Avoid bright backlight.</div></div>
+        <div class="step"><div><b>5–10 seconds.</b> System trains ~100+ embeddings via augmentation.</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Form + Training Panel -->
+  <div>
+    <div class="card">
+      <div class="card-title">Student & Subject Details</div>
+
+      <div class="form-group">
+        <label class="form-label">Select Student *</label>
+        <select class="form-select" id="studentSelect">
+          <option value="">— Select —</option>
+          {% for s in students %}
+          <option value="{{ s.id }}">{{ s.roll_no }} — {{ s.name }} ({{ s.section }})</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Enroll For Subjects</label>
+        <div class="multi-select" id="subjectChips">
+          {% for sub in subjects %}
+          <div class="subj-chip" data-id="{{ sub.id }}" onclick="toggleSubject(this)">
+            {{ sub.code }} — {{ sub.name }}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <hr style="border-color:var(--border);margin:20px 0">
+
+      <div style="display:flex;align-items:center;gap:14px">
+        <button class="btn btn-success" id="btnEnroll" onclick="submitEnrollment()" >
+          <span id="enrollText">Train &amp; Enroll</span>
+        </button>
+        <div id="enrollStatus" style="font-size:13px;color:var(--muted)"></div>
+      </div>
+    </div>
+
+    <!-- Training Pipeline -->
+    <div class="card" id="trainingCard" style="display:none">
+      <div class="card-title">🔬 Training Pipeline Progress</div>
+      <div class="pipeline">
+
+        <div class="pipe-step" id="p-video">
+          <div class="pipe-dot"></div>
+          <div>
+            <div class="pipe-title">Video Decode &amp; Frame Extraction</div>
+            <div class="pipe-sub" id="p-video-sub">Adaptive sampling every 0.38s</div>
+          </div>
+        </div>
+
+        <div class="pipe-step" id="p-enhance">
+          <div class="pipe-dot"></div>
+          <div>
+            <div class="pipe-title">Frame Enhancement (Low-light + Distant Face)</div>
+            <div class="pipe-sub">CLAHE · Gamma Correction · NLM Denoising · Bicubic Upscale</div>
+          </div>
+        </div>
+
+        <div class="pipe-step" id="p-detect">
+          <div class="pipe-dot"></div>
+          <div>
+            <div class="pipe-title">Face Detection &amp; Quality Filtering</div>
+            <div class="pipe-sub" id="p-detect-sub">InsightFace SCRFD — rejecting blurry / low-quality frames</div>
+          </div>
+        </div>
+
+        <div class="pipe-step" id="p-embed">
+          <div class="pipe-dot"></div>
+          <div>
+            <div class="pipe-title">ArcFace Embedding Generation</div>
+            <div class="pipe-sub">buffalo_l model — 512-dim vectors — L2 normalized per frame</div>
+          </div>
+        </div>
+
+        <div class="pipe-step" id="p-aug">
+          <div class="pipe-dot"></div>
+          <div>
+            <div class="pipe-title">Augmentation for Robustness Training</div>
+            <div class="pipe-sub" id="p-aug-sub">Generating domain variants for each accepted frame…</div>
+            <div class="aug-pills" id="augPills"></div>
+          </div>
+        </div>
+
+        <div class="pipe-step" id="p-save">
+          <div class="pipe-dot"></div>
+          <div>
+            <div class="pipe-title">Save Embeddings &amp; Reload Face DB</div>
+            <div class="pipe-sub">Writing .pkl — updating in-memory cosine search index</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Result -->
+    <div class="card" id="resultCard" style="display:none">
+      <div class="card-title"> Model Trained &amp; Enrolled</div>
+      <div id="resultContent"></div>
+    </div>
+
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let stream=null, recorder=null, chunks=[], timerInt=null;
+let recordedBlob=null, recStart=null;
+const MAX_SEC = 10;
+
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video:{width:640,height:480,facingMode:'user'}, audio:false
+    });
+    document.getElementById('liveVideo').srcObject = stream;
+    document.getElementById('btnRecord').disabled = false;
+    document.getElementById('btnCamera').disabled = true;
+    toast('Camera ready ✓');
+  } catch(e) {
+    toast('Camera error: ' + e.message, 'error');
+  }
+}
+
+function startRecording() {
+  chunks=[]; recordedBlob=null;
+  recorder = new MediaRecorder(stream, {mimeType:'video/webm;codecs=vp8'});
+  recorder.ondataavailable = e => { if(e.data.size>0) chunks.push(e.data); };
+  recorder.onstop = onRecordStop;
+  recorder.start(100);
+  recStart = Date.now();
+
+  document.getElementById('recBadge').style.display='flex';
+  document.getElementById('videoBox').classList.add('recording');
+  document.getElementById('btnRecord').disabled=true;
+  document.getElementById('btnStop').disabled=false;
+  // document.getElementById('btnEnroll').disabled=true;
+  document.getElementById('previewArea').style.display='none';
+  document.getElementById('resultCard').style.display='none';
+  document.getElementById('trainingCard').style.display='none';
+
+  timerInt = setInterval(()=>{
+    const e = (Date.now()-recStart)/1000;
+    const p = Math.min(100,(e/MAX_SEC)*100);
+    document.getElementById('timerFill').style.width=p+'%';
+    document.getElementById('timerDisplay').textContent=e.toFixed(1)+'s';
+    document.getElementById('timerFloat').textContent=e.toFixed(1)+'s';
+    if(e>=MAX_SEC) stopRecording();
+  },100);
+}
+
+let recDuration = 0; // capture duration at stop time, not in async callback
+
+function stopRecording() {
+  recDuration = recStart ? (Date.now() - recStart) / 1000 : 0;
+  if(recorder && recorder.state!=='inactive') recorder.stop();
+  clearInterval(timerInt);
+  document.getElementById('recBadge').style.display='none';
+  document.getElementById('videoBox').classList.remove('recording');
+  document.getElementById('btnStop').disabled=true;
+  document.getElementById('btnRecord').disabled=false;
+}
+
+function retake() {
+  recordedBlob=null; recDuration=0;
+  document.getElementById('previewArea').style.display='none';
+  document.getElementById('resultCard').style.display='none';
+  document.getElementById('trainingCard').style.display='none';
+  // document.getElementById('btnEnroll').disabled=true;
+  document.getElementById('btnRetake').style.display='none';
+  resetPipeline();
+}
+
+async function onRecordStop() {
+  recordedBlob = new Blob(chunks,{type:'video/webm'});
+  const dur = recDuration; // use value captured synchronously at stop time
+  if(dur < 3){ toast('Too short! Record 5-10 seconds.','error'); return; }
+  await previewFrames(dur);
+  document.getElementById('btnEnroll').disabled=false;
+  document.getElementById('btnRetake').style.display='inline-flex';
+  toast(`Ready to train (${dur.toFixed(1)}s recorded)`);
+}
+
+async function previewFrames(dur) {
+  const video = document.createElement('video');
+  video.src = URL.createObjectURL(recordedBlob);
+  await new Promise(r=>{ video.onloadedmetadata=r; });
+  const c=document.createElement('canvas');
+  c.width=80; c.height=60;
+  const ctx=c.getContext('2d');
+  const thumbs=document.getElementById('frameThumbs');
+  thumbs.innerHTML='';
+  const count=Math.min(14,Math.max(6,Math.floor((video.duration||dur)*2.2)));
+  let qSum=0;
+  for(let i=0;i<count;i++){
+    video.currentTime=(i/count)*(video.duration||dur);
+    await new Promise(r=>{ video.onseeked=r; });
+    ctx.drawImage(video,0,0,80,60);
+    const img=document.createElement('img');
+    img.className='frame-thumb';
+    img.src=c.toDataURL('image/jpeg',0.8);
+    const id=ctx.getImageData(0,0,80,60);
+    const q=estQ(id); qSum+=q;
+    if(q>0.6) img.classList.add('best');
+    img.title=`Quality: ${(q*100).toFixed(0)}%`;
+    thumbs.appendChild(img);
+  }
+  const aq=qSum/count;
+  document.getElementById('qualityFill').style.width=(aq*100)+'%';
+  document.getElementById('qualityFill').style.background=
+    aq>0.6?'var(--green)':aq>0.42?'var(--orange)':'var(--red)';
+  document.getElementById('qualityText').textContent=
+    aq>0.6 ? 'Good — training will succeed' :
+    aq>0.42? 'Moderate — better lighting recommended' :
+             'Low quality — retake in better conditions';
+  document.getElementById('frameCountLabel').textContent=`(${count} sampled)`;
+  document.getElementById('previewArea').style.display='block';
+}
+
+function estQ(imgData) {
+  const d=imgData.data; let s=0,s2=0,n=d.length/4;
+  for(let i=0;i<d.length;i+=4){
+    const v=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+    s+=v; s2+=v*v;
+  }
+  const m=s/n, v=(s2/n)-m*m;
+  return Math.max(0,Math.min(1, 0.6*Math.min(1,v/2000)+0.4*(1-Math.abs(m-128)/128)));
+}
+
+function toggleSubject(el){ el.classList.toggle('selected'); }
+
+function resetPipeline(){
+  ['p-video','p-enhance','p-detect','p-embed','p-aug','p-save']
+    .forEach(id=>{ const e=document.getElementById(id); e.classList.remove('active','done','err'); });
+}
+
+function pipeSet(id, cls, sub){
+  const el=document.getElementById(id);
+  el.classList.remove('active','done','err');
+  if(cls) el.classList.add(cls);
+  if(sub!==undefined){
+    const s=el.querySelector('.pipe-sub');
+    if(s) s.textContent=sub;
+  }
+}
+
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+async function animatePipeline(){
+  const AUGS=['Glasses','Low-light','Distance','Hat shadow','Partial cover','Brightness jitter','H-Flip','Gaussian noise','Motion blur'];
+  document.getElementById('augPills').innerHTML=AUGS.map(a=>`<span class="aug-pill">${a}</span>`).join('');
+
+  const steps=[
+    ['p-video',  400, `Video decoded — adaptive sampling every 0.38s`],
+    ['p-enhance',550, `CLAHE + gamma + denoise + upscale applied`],
+    ['p-detect', 700, `SCRFD detector — quality-filtered frames accepted`],
+    ['p-embed',  850, `ArcFace 512-dim embeddings generated, L2 normalized`],
+    ['p-aug',   1100, `${AUGS.length} augmentation types × each frame completed`],
+  ];
+  for(const [id, delay, doneText] of steps){
+    pipeSet(id,'active');
+    await sleep(delay);
+    pipeSet(id,'done', doneText);
+    await sleep(80);
+  }
+  pipeSet('p-save','active');
+}
+
+async function submitEnrollment(){
+  const sid=document.getElementById('studentSelect').value;
+  if(!sid){ toast('Select a student','error'); return; }
+  if(!recordedBlob){ toast('Record a video first','error'); return; }
+  const subjs=[...document.querySelectorAll('.subj-chip.selected')].map(e=>e.dataset.id);
+  if(!subjs.length){ toast('Select at least one subject','error'); return; }
+
+  document.getElementById('trainingCard').style.display='block';
+  document.getElementById('resultCard').style.display='none';
+  resetPipeline();
+  // document.getElementById('btnEnroll').disabled=true;
+  document.getElementById('enrollIcon').innerHTML='<span class="spinner"></span>';
+  document.getElementById('enrollText').textContent='Training…';
+  document.getElementById('enrollStatus').textContent='Processing video…';
+
+  const pipePromise = animatePipeline();
+  const b64 = await blobToBase64(recordedBlob);
+  const result = await api('POST','/api/enroll',{
+    student_id:parseInt(sid),
+    subject_ids:subjs.map(Number),
+    video_b64:b64
+  });
+  await pipePromise;
+
+
+  document.getElementById('enrollText').textContent='Train & Enroll';
+  document.getElementById('enrollStatus').textContent='';
+
+  if(result.error){
+    pipeSet('p-save','err','Failed — '+result.error);
+    toast(result.error,'error');
+    document.getElementById('btnEnroll').disabled=false;
+    return;
+  }
+
+  pipeSet('p-save','done','Embeddings saved — face DB reloaded ✓');
+  showResult(result);
+  toast(result.message || 'Enrollment complete!');
+  setTimeout(()=>location.reload(), 4000);
+}
+
+function showResult(r){
+  document.getElementById('resultCard').style.display='block';
+  const td=r.training_details||{};
+  document.getElementById('resultContent').innerHTML=`
+    <div class="metric-row">
+      <div class="metric"><div class="v">${r.frame_count||0}</div><div class="l">Raw Frames</div></div>
+      <div class="metric"><div class="v" style="color:var(--accent2)">${r.augmented_count||0}</div><div class="l">Augmented<br>Variants</div></div>
+      <div class="metric"><div class="v" style="color:var(--green)">${r.total_samples||0}</div><div class="l">Total<br>Embeddings</div></div>
+      <div class="metric"><div class="v" style="color:var(--orange)">${Math.round((r.quality_avg||0)*100)}%</div><div class="l">Avg Quality</div></div>
+    </div>
+    <div style="padding:12px;background:rgba(16,185,129,0.09);border-radius:8px;border:1px solid rgba(16,185,129,0.25);font-size:13px;margin-bottom:10px">
+      ✅ ${r.message}
+    </div>
+    <div style="font-size:12px;color:var(--muted);line-height:1.8">
+      <b>Model:</b> ${td.model_used||'ArcFace (buffalo_l)'}
+      &nbsp;·&nbsp;<b>Subjects:</b> ${r.subjects_enrolled||subjs.length}
+    </div>
+    ${td.augmentations_applied?`
+    <div style="font-size:12px;color:var(--muted);margin-top:10px"><b>Augmentations applied:</b></div>
+    <div class="aug-pills" style="margin-top:6px">
+      ${td.augmentations_applied.map(a=>`<span class="aug-pill">${a}</span>`).join('')}
+    </div>`:''}
+  `;
+}
+
+function blobToBase64(blob){
+  return new Promise(r=>{ const fr=new FileReader(); fr.onloadend=()=>r(fr.result.split(',')[1]); fr.readAsDataURL(blob); });
+}
+</script>
+{% endblock %}

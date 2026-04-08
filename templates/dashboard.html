@@ -1,0 +1,205 @@
+{% extends 'base.html' %}
+{% block title %}Dashboard{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block head %}
+<style>
+  .sys-row { display:flex; justify-content:space-between; align-items:center; padding:11px 0; border-bottom:1px solid var(--border); }
+  .sys-row:last-child { border-bottom:none; }
+  .sys-key { font-size:13px; color:var(--text); }
+  .sys-val { font-size:12px; }
+
+  .model-bar { height:6px; background:var(--border); border-radius:3px; margin-top:6px; overflow:hidden; }
+  .model-fill { height:100%; border-radius:3px; background:linear-gradient(90deg,var(--accent),var(--accent2)); transition:width 0.6s; }
+
+  .student-mini { display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--border); }
+  .student-mini:last-child { border-bottom:none; }
+  .avatar { width:32px; height:32px; border-radius:50%; background:var(--surface2); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:700; color:var(--accent); flex-shrink:0; }
+
+  .aug-tag { font-size:10px; padding:2px 7px; border-radius:10px; background:rgba(6,182,212,0.1); border:1px solid rgba(6,182,212,0.2); color:var(--accent2); font-family:var(--mono); }
+  .aug-grid { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- Top Stats -->
+<div class="grid-4" style="margin-bottom:24px">
+  <div class="stat-card">
+    <div class="stat-val" id="statStudents">—</div>
+    <div class="stat-label">Total Students</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val" id="statSubjects">—</div>
+    <div class="stat-label">Subjects</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val" style="color:var(--green)" id="statEnrolled">—</div>
+    <div class="stat-label">Face Models Trained</div>
+    <div class="model-bar" style="margin-top:10px">
+      <div class="model-fill" id="enrollBar" style="width:0%"></div>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:4px" id="enrollPct"></div>
+  </div>
+  
+</div>
+
+<div class="grid-2" style="margin-bottom:24px">
+
+  <!-- Quick Actions -->
+  <div class="card">
+    <div class="card-title">Quick Actions</div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <a href="/enroll" class="btn btn-primary" style="justify-content:flex-start">
+        Enroll &amp; Train Face Model
+      </a>
+      <a href="/attendance" class="btn btn-success" style="justify-content:flex-start">
+        Start Live Attendance
+      </a>
+      <a href="/students" class="btn btn-ghost" style="justify-content:flex-start">
+        Manage Students
+      </a>
+      <a href="/subjects" class="btn btn-ghost" style="justify-content:flex-start">
+        Manage Subjects
+      </a>
+    </div>
+  </div>
+
+  <!-- System Status -->
+  <div class="card">
+    <div class="card-title">System Status</div>
+    <div class="sys-row">
+      <span class="sys-key">Face Recognition Model</span>
+      <span class="badge badge-green" id="arcfaceStatus">ArcFace (buffalo_l)</span>
+    </div>
+    <div class="sys-row">
+      <span class="sys-key">Anti-Spoofing</span>
+      <span class="badge badge-blue" id="antispoofStatus">Texture Analysis</span>
+    </div>
+    <div class="sys-row">
+      <span class="sys-key">Augmentation Engine</span>
+      <span class="badge badge-green">9 Types Active</span>
+    </div>
+    <div class="sys-row">
+      <span class="sys-key">Database</span>
+      <span class="badge badge-green">SQLite ✓</span>
+    </div>
+    <div class="sys-row">
+      <span class="sys-key">In-Memory Face DB</span>
+      <span class="badge badge-blue" id="faceDbStatus">Loading…</span>
+    </div>
+  </div>
+</div>
+
+<div class="grid-2">
+
+  <!-- Enrollment Status -->
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div class="card-title" style="margin:0">Student Face Models</div>
+      <a href="/enroll" style="font-size:12px;color:var(--accent);text-decoration:none">+ Enroll →</a>
+    </div>
+    <div id="studentMiniList">
+      <div style="color:var(--muted);font-size:13px;text-align:center;padding:24px 0">
+        <span class="spinner"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Training Pipeline Info -->
+  <div class="card">
+    <div class="card-title">Training Pipeline</div>
+    <div style="font-size:13px;color:var(--muted);line-height:1.9">
+      Each 5–10s enrollment video runs through:
+    </div>
+    <div style="margin:14px 0;display:flex;flex-direction:column;gap:8px;font-size:13px">
+      <div style="display:flex;gap:10px;align-items:flex-start">
+        <span style="color:var(--accent);font-family:var(--mono);font-size:11px;margin-top:2px">01</span>
+        <div><b>Frame extraction</b> — adaptive 0.38s sampling</div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:flex-start">
+        <span style="color:var(--accent);font-family:var(--mono);font-size:11px;margin-top:2px">02</span>
+        <div><b>Enhancement</b> — CLAHE · Gamma · Denoise · Upscale</div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:flex-start">
+        <span style="color:var(--accent);font-family:var(--mono);font-size:11px;margin-top:2px">03</span>
+        <div><b>ArcFace embeddings</b> — 512-dim via buffalo_l</div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:flex-start">
+        <span style="color:var(--accent);font-family:var(--mono);font-size:11px;margin-top:2px">04</span>
+        <div><b>Augmentation</b> — ~10 variants per frame</div>
+      </div>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Augmentation types trained on:</div>
+    <div class="aug-grid">
+      <span class="aug-tag">Glasses</span>
+      <span class="aug-tag">Low-light</span>
+      <span class="aug-tag">Distance</span>
+      <span class="aug-tag">Hat shadow</span>
+      <span class="aug-tag">Partial cover</span>
+      <span class="aug-tag">Brightness</span>
+      <span class="aug-tag">H-Flip</span>
+      <span class="aug-tag">Noise</span>
+      <span class="aug-tag">Motion blur</span>
+    </div>
+    <div style="margin-top:16px;padding:12px;background:rgba(59,130,246,0.07);border-radius:8px;border:1px solid rgba(59,130,246,0.18);font-size:12px;color:var(--muted)">
+      💡 A 5-second recording typically produces <b style="color:var(--text)">~120–160 total embeddings</b> after augmentation, stored for cosine similarity search.
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadDashboard() {
+  const [students, subjects] = await Promise.all([
+    api('GET', '/api/students'),
+    api('GET', '/api/subjects')
+  ]);
+
+  const enrolled = students.filter(s => s.has_face);
+  const pct = students.length ? Math.round(enrolled.length / students.length * 100) : 0;
+
+  document.getElementById('statStudents').textContent  = students.length;
+  document.getElementById('statSubjects').textContent  = subjects.length;
+  document.getElementById('statEnrolled').textContent  = enrolled.length;
+  document.getElementById('enrollBar').style.width     = pct + '%';
+  document.getElementById('enrollPct').textContent     = students.length
+    ? `${pct}% of students trained`
+    : 'No students yet';
+
+  document.getElementById('faceDbStatus').textContent  = enrolled.length
+    ? `${enrolled.length} model${enrolled.length!==1?'s':''} loaded`
+    : 'Empty';
+
+  // Student mini list
+  const listEl = document.getElementById('studentMiniList');
+  if (!students.length) {
+    listEl.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:24px 0">No students yet. <a href="/students" style="color:var(--accent)">Add one →</a></div>';
+    return;
+  }
+
+  listEl.innerHTML = students.slice(0, 8).map(s => `
+    <div class="student-mini">
+      <div class="avatar">${s.name[0].toUpperCase()}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.name}</div>
+        <div style="font-size:11px;color:var(--muted);font-family:var(--mono)">${s.roll_no} · ${s.section}</div>
+      </div>
+      <div>
+        ${s.has_face
+          ? '<span class="badge badge-green" style="font-size:10px">✓ Trained</span>'
+          : `<a href="/enroll" class="badge badge-orange" style="font-size:10px;text-decoration:none;cursor:pointer">Enroll</a>`}
+      </div>
+    </div>
+  `).join('') + (students.length > 8
+    ? `<div style="text-align:center;margin-top:12px;font-size:12px;color:var(--muted)">
+        <a href="/students" style="color:var(--accent)">View all ${students.length} students →</a>
+       </div>`
+    : '');
+}
+
+loadDashboard();
+</script>
+{% endblock %}

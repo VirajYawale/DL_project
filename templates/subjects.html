@@ -1,0 +1,77 @@
+{% extends 'base.html' %}
+{% block title %}Subjects{% endblock %}
+{% block page_title %}Subject Management{% endblock %}
+
+{% block content %}
+<div style="display:flex;justify-content:flex-end;margin-bottom:20px">
+  <button class="btn btn-primary" onclick="document.getElementById('addModal').classList.add('open')">+ Add Subject</button>
+</div>
+
+<div class="card">
+  <div class="card-title">All Subjects</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>CODE</th><th>NAME</th><th>FACULTY</th><th>SECTION</th><th>ENROLLED</th></tr></thead>
+      <tbody id="subjTable">
+        <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:40px"><span class="spinner"></span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="modal-overlay" id="addModal">
+  <div class="modal">
+    <div class="modal-title">Add Subject</div>
+    <div class="form-group"><label class="form-label">Subject Code *</label>
+      <input class="form-input" id="code" placeholder="e.g. CS301"></div>
+    <div class="form-group"><label class="form-label">Subject Name *</label>
+      <input class="form-input" id="name" placeholder="Data Structures"></div>
+    <div class="form-group"><label class="form-label">Faculty Name</label>
+      <input class="form-input" id="faculty" placeholder="Prof. ABC"></div>
+    <div class="form-group"><label class="form-label">Section</label>
+      <select class="form-select" id="section">
+        <option value="">All Sections</option>
+        <option value="A">A</option><option value="B">B</option>
+        <option value="C">C</option><option value="D">D</option>
+      </select>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" onclick="addSubject()">Add Subject</button>
+      <button class="btn btn-ghost" onclick="document.getElementById('addModal').classList.remove('open')">Cancel</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadSubjects() {
+  const subjects = await api('GET', '/api/subjects');
+  document.getElementById('subjTable').innerHTML = subjects.length
+    ? subjects.map(s => `<tr>
+        <td><code style="font-family:var(--mono)">${s.code}</code></td>
+        <td>${s.name}</td>
+        <td>${s.faculty || '—'}</td>
+        <td>${s.section ? '<span class="badge badge-blue">'+s.section+'</span>' : 'All'}</td>
+        <td><span class="badge badge-green">${s.enrolled_count} students</span></td>
+      </tr>`).join('')
+    : '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:40px">No subjects yet.</td></tr>';
+}
+
+async function addSubject() {
+  const data = {
+    code: document.getElementById('code').value.trim(),
+    name: document.getElementById('name').value.trim(),
+    faculty: document.getElementById('faculty').value.trim(),
+    section: document.getElementById('section').value
+  };
+  if(!data.code || !data.name) { toast('Code and Name required', 'error'); return; }
+  const res = await api('POST', '/api/subjects', data);
+  if(res.error) { toast(res.error, 'error'); return; }
+  toast(`Subject ${res.name} added`);
+  document.getElementById('addModal').classList.remove('open');
+  loadSubjects();
+}
+loadSubjects();
+</script>
+{% endblock %}
