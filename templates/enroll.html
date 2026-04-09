@@ -99,6 +99,16 @@
     display:flex; align-items:center; justify-content:center;
     font-size:10px; font-weight:700; flex-shrink:0; margin-top:1px;
   }
+
+  /* Spinner for enroll button */
+  .spinner {
+    display:inline-block; width:12px; height:12px;
+    border:2px solid rgba(255,255,255,0.3);
+    border-top-color:#fff; border-radius:50%;
+    animation:spin 0.7s linear infinite; margin-right:6px;
+    vertical-align:middle;
+  }
+  @keyframes spin { to { transform:rotate(360deg); } }
 </style>
 {% endblock %}
 
@@ -181,8 +191,8 @@
       <hr style="border-color:var(--border);margin:20px 0">
 
       <div style="display:flex;align-items:center;gap:14px">
-        <button class="btn btn-success" id="btnEnroll" onclick="submitEnrollment()" >
-          <span id="enrollText">Train &amp; Enroll</span>
+        <button class="btn btn-success" id="btnEnroll" onclick="submitEnrollment()">
+          <span id="enrollBtnContent">Train &amp; Enroll</span>
         </button>
         <div id="enrollStatus" style="font-size:13px;color:var(--muted)"></div>
       </div>
@@ -247,7 +257,7 @@
 
     <!-- Result -->
     <div class="card" id="resultCard" style="display:none">
-      <div class="card-title"> Model Trained &amp; Enrolled</div>
+      <div class="card-title">✅ Model Trained &amp; Enrolled</div>
       <div id="resultContent"></div>
     </div>
 
@@ -258,236 +268,271 @@
 
 {% block scripts %}
 <script>
-let stream=null, recorder=null, chunks=[], timerInt=null;
-let recordedBlob=null, recStart=null;
+let stream = null, recorder = null, chunks = [], timerInt = null;
+let recordedBlob = null, recStart = null;
+let recDuration = 0;
 const MAX_SEC = 10;
 
+// ── Camera ──────────────────────────────────────────────────────────────────
 async function startCamera() {
   try {
     stream = await navigator.mediaDevices.getUserMedia({
-      video:{width:640,height:480,facingMode:'user'}, audio:false
+      video: { width: 640, height: 480, facingMode: 'user' }, audio: false
     });
     document.getElementById('liveVideo').srcObject = stream;
     document.getElementById('btnRecord').disabled = false;
     document.getElementById('btnCamera').disabled = true;
     toast('Camera ready ✓');
-  } catch(e) {
+  } catch (e) {
     toast('Camera error: ' + e.message, 'error');
   }
 }
 
+// ── Recording ────────────────────────────────────────────────────────────────
 function startRecording() {
-  chunks=[]; recordedBlob=null;
-  recorder = new MediaRecorder(stream, {mimeType:'video/webm;codecs=vp8'});
-  recorder.ondataavailable = e => { if(e.data.size>0) chunks.push(e.data); };
+  chunks = []; recordedBlob = null; recDuration = 0;
+  recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8' });
+  recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
   recorder.onstop = onRecordStop;
   recorder.start(100);
   recStart = Date.now();
 
-  document.getElementById('recBadge').style.display='flex';
+  document.getElementById('recBadge').style.display = 'flex';
   document.getElementById('videoBox').classList.add('recording');
-  document.getElementById('btnRecord').disabled=true;
-  document.getElementById('btnStop').disabled=false;
-  // document.getElementById('btnEnroll').disabled=true;
-  document.getElementById('previewArea').style.display='none';
-  document.getElementById('resultCard').style.display='none';
-  document.getElementById('trainingCard').style.display='none';
+  document.getElementById('btnRecord').disabled = true;
+  document.getElementById('btnStop').disabled = false;
+  document.getElementById('previewArea').style.display = 'none';
+  document.getElementById('resultCard').style.display = 'none';
+  document.getElementById('trainingCard').style.display = 'none';
 
-  timerInt = setInterval(()=>{
-    const e = (Date.now()-recStart)/1000;
-    const p = Math.min(100,(e/MAX_SEC)*100);
-    document.getElementById('timerFill').style.width=p+'%';
-    document.getElementById('timerDisplay').textContent=e.toFixed(1)+'s';
-    document.getElementById('timerFloat').textContent=e.toFixed(1)+'s';
-    if(e>=MAX_SEC) stopRecording();
-  },100);
+  timerInt = setInterval(() => {
+    const elapsed = (Date.now() - recStart) / 1000;
+    const pct = Math.min(100, (elapsed / MAX_SEC) * 100);
+    document.getElementById('timerFill').style.width = pct + '%';
+    document.getElementById('timerDisplay').textContent = elapsed.toFixed(1) + 's';
+    document.getElementById('timerFloat').textContent = elapsed.toFixed(1) + 's';
+    if (elapsed >= MAX_SEC) stopRecording();
+  }, 100);
 }
-
-let recDuration = 0; // capture duration at stop time, not in async callback
 
 function stopRecording() {
   recDuration = recStart ? (Date.now() - recStart) / 1000 : 0;
-  if(recorder && recorder.state!=='inactive') recorder.stop();
+  if (recorder && recorder.state !== 'inactive') recorder.stop();
   clearInterval(timerInt);
-  document.getElementById('recBadge').style.display='none';
+  document.getElementById('recBadge').style.display = 'none';
   document.getElementById('videoBox').classList.remove('recording');
-  document.getElementById('btnStop').disabled=true;
-  document.getElementById('btnRecord').disabled=false;
+  document.getElementById('btnStop').disabled = true;
+  document.getElementById('btnRecord').disabled = false;
 }
 
 function retake() {
-  recordedBlob=null; recDuration=0;
-  document.getElementById('previewArea').style.display='none';
-  document.getElementById('resultCard').style.display='none';
-  document.getElementById('trainingCard').style.display='none';
-  // document.getElementById('btnEnroll').disabled=true;
-  document.getElementById('btnRetake').style.display='none';
+  recordedBlob = null; recDuration = 0;
+  document.getElementById('previewArea').style.display = 'none';
+  document.getElementById('resultCard').style.display = 'none';
+  document.getElementById('trainingCard').style.display = 'none';
+  document.getElementById('btnRetake').style.display = 'none';
   resetPipeline();
 }
 
 async function onRecordStop() {
-  recordedBlob = new Blob(chunks,{type:'video/webm'});
-  const dur = recDuration; // use value captured synchronously at stop time
-  if(dur < 3){ toast('Too short! Record 5-10 seconds.','error'); return; }
+  recordedBlob = new Blob(chunks, { type: 'video/webm' });
+  const dur = recDuration;
+  if (dur < 3) { toast('Too short! Record 5–10 seconds.', 'error'); return; }
   await previewFrames(dur);
-  document.getElementById('btnEnroll').disabled=false;
-  document.getElementById('btnRetake').style.display='inline-flex';
+  document.getElementById('btnEnroll').disabled = false;
+  document.getElementById('btnRetake').style.display = 'inline-flex';
   toast(`Ready to train (${dur.toFixed(1)}s recorded)`);
 }
 
+// ── Frame Preview ────────────────────────────────────────────────────────────
 async function previewFrames(dur) {
   const video = document.createElement('video');
   video.src = URL.createObjectURL(recordedBlob);
-  await new Promise(r=>{ video.onloadedmetadata=r; });
-  const c=document.createElement('canvas');
-  c.width=80; c.height=60;
-  const ctx=c.getContext('2d');
-  const thumbs=document.getElementById('frameThumbs');
-  thumbs.innerHTML='';
-  const count=Math.min(14,Math.max(6,Math.floor((video.duration||dur)*2.2)));
-  let qSum=0;
-  for(let i=0;i<count;i++){
-    video.currentTime=(i/count)*(video.duration||dur);
-    await new Promise(r=>{ video.onseeked=r; });
-    ctx.drawImage(video,0,0,80,60);
-    const img=document.createElement('img');
-    img.className='frame-thumb';
-    img.src=c.toDataURL('image/jpeg',0.8);
-    const id=ctx.getImageData(0,0,80,60);
-    const q=estQ(id); qSum+=q;
-    if(q>0.6) img.classList.add('best');
-    img.title=`Quality: ${(q*100).toFixed(0)}%`;
+  await new Promise(r => { video.onloadedmetadata = r; });
+  const c = document.createElement('canvas');
+  c.width = 80; c.height = 60;
+  const ctx = c.getContext('2d');
+  const thumbs = document.getElementById('frameThumbs');
+  thumbs.innerHTML = '';
+  const count = Math.min(14, Math.max(6, Math.floor((video.duration || dur) * 2.2)));
+  let qSum = 0;
+  for (let i = 0; i < count; i++) {
+    video.currentTime = (i / count) * (video.duration || dur);
+    await new Promise(r => { video.onseeked = r; });
+    ctx.drawImage(video, 0, 0, 80, 60);
+    const img = document.createElement('img');
+    img.className = 'frame-thumb';
+    img.src = c.toDataURL('image/jpeg', 0.8);
+    const id = ctx.getImageData(0, 0, 80, 60);
+    const q = estQ(id); qSum += q;
+    if (q > 0.6) img.classList.add('best');
+    img.title = `Quality: ${(q * 100).toFixed(0)}%`;
     thumbs.appendChild(img);
   }
-  const aq=qSum/count;
-  document.getElementById('qualityFill').style.width=(aq*100)+'%';
-  document.getElementById('qualityFill').style.background=
-    aq>0.6?'var(--green)':aq>0.42?'var(--orange)':'var(--red)';
-  document.getElementById('qualityText').textContent=
-    aq>0.6 ? 'Good — training will succeed' :
-    aq>0.42? 'Moderate — better lighting recommended' :
-             'Low quality — retake in better conditions';
-  document.getElementById('frameCountLabel').textContent=`(${count} sampled)`;
-  document.getElementById('previewArea').style.display='block';
+  const aq = qSum / count;
+  document.getElementById('qualityFill').style.width = (aq * 100) + '%';
+  document.getElementById('qualityFill').style.background =
+    aq > 0.6 ? 'var(--green)' : aq > 0.42 ? 'var(--orange)' : 'var(--red)';
+  document.getElementById('qualityText').textContent =
+    aq > 0.6 ? 'Good — training will succeed' :
+    aq > 0.42 ? 'Moderate — better lighting recommended' :
+                'Low quality — retake in better conditions';
+  document.getElementById('frameCountLabel').textContent = `(${count} sampled)`;
+  document.getElementById('previewArea').style.display = 'block';
 }
 
 function estQ(imgData) {
-  const d=imgData.data; let s=0,s2=0,n=d.length/4;
-  for(let i=0;i<d.length;i+=4){
-    const v=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
-    s+=v; s2+=v*v;
+  const d = imgData.data; let s = 0, s2 = 0, n = d.length / 4;
+  for (let i = 0; i < d.length; i += 4) {
+    const v = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    s += v; s2 += v * v;
   }
-  const m=s/n, v=(s2/n)-m*m;
-  return Math.max(0,Math.min(1, 0.6*Math.min(1,v/2000)+0.4*(1-Math.abs(m-128)/128)));
+  const m = s / n, v = (s2 / n) - m * m;
+  return Math.max(0, Math.min(1, 0.6 * Math.min(1, v / 2000) + 0.4 * (1 - Math.abs(m - 128) / 128)));
 }
 
-function toggleSubject(el){ el.classList.toggle('selected'); }
+// ── UI Helpers ───────────────────────────────────────────────────────────────
+function toggleSubject(el) { el.classList.toggle('selected'); }
 
-function resetPipeline(){
-  ['p-video','p-enhance','p-detect','p-embed','p-aug','p-save']
-    .forEach(id=>{ const e=document.getElementById(id); e.classList.remove('active','done','err'); });
+function setEnrollBtnState(loading) {
+  const btn = document.getElementById('btnEnroll');
+  const content = document.getElementById('enrollBtnContent');
+  btn.disabled = loading;
+  content.innerHTML = loading
+    ? '<span class="spinner"></span>Training…'
+    : 'Train &amp; Enroll';
 }
 
-function pipeSet(id, cls, sub){
-  const el=document.getElementById(id);
-  el.classList.remove('active','done','err');
-  if(cls) el.classList.add(cls);
-  if(sub!==undefined){
-    const s=el.querySelector('.pipe-sub');
-    if(s) s.textContent=sub;
+function resetPipeline() {
+  ['p-video', 'p-enhance', 'p-detect', 'p-embed', 'p-aug', 'p-save']
+    .forEach(id => {
+      const e = document.getElementById(id);
+      e.classList.remove('active', 'done', 'err');
+    });
+}
+
+function pipeSet(id, cls, sub) {
+  const el = document.getElementById(id);
+  el.classList.remove('active', 'done', 'err');
+  if (cls) el.classList.add(cls);
+  if (sub !== undefined) {
+    const s = el.querySelector('.pipe-sub');
+    if (s) s.textContent = sub;
   }
 }
 
-const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-async function animatePipeline(){
-  const AUGS=['Glasses','Low-light','Distance','Hat shadow','Partial cover','Brightness jitter','H-Flip','Gaussian noise','Motion blur'];
-  document.getElementById('augPills').innerHTML=AUGS.map(a=>`<span class="aug-pill">${a}</span>`).join('');
+async function animatePipeline() {
+  const AUGS = ['Glasses', 'Low-light', 'Distance', 'Hat shadow', 'Partial cover',
+                'Brightness jitter', 'H-Flip', 'Gaussian noise', 'Motion blur'];
+  document.getElementById('augPills').innerHTML =
+    AUGS.map(a => `<span class="aug-pill">${a}</span>`).join('');
 
-  const steps=[
-    ['p-video',  400, `Video decoded — adaptive sampling every 0.38s`],
-    ['p-enhance',550, `CLAHE + gamma + denoise + upscale applied`],
-    ['p-detect', 700, `SCRFD detector — quality-filtered frames accepted`],
-    ['p-embed',  850, `ArcFace 512-dim embeddings generated, L2 normalized`],
-    ['p-aug',   1100, `${AUGS.length} augmentation types × each frame completed`],
+  const steps = [
+    ['p-video',   400,  'Video decoded — adaptive sampling every 0.38s'],
+    ['p-enhance', 550,  'CLAHE + gamma + denoise + upscale applied'],
+    ['p-detect',  700,  'SCRFD detector — quality-filtered frames accepted'],
+    ['p-embed',   850,  'ArcFace 512-dim embeddings generated, L2 normalized'],
+    ['p-aug',     1100, `${AUGS.length} augmentation types × each frame completed`],
   ];
-  for(const [id, delay, doneText] of steps){
-    pipeSet(id,'active');
+  for (const [id, delay, doneText] of steps) {
+    pipeSet(id, 'active');
     await sleep(delay);
-    pipeSet(id,'done', doneText);
+    pipeSet(id, 'done', doneText);
     await sleep(80);
   }
-  pipeSet('p-save','active');
+  pipeSet('p-save', 'active');
 }
 
-async function submitEnrollment(){
-  const sid=document.getElementById('studentSelect').value;
-  if(!sid){ toast('Select a student','error'); return; }
-  if(!recordedBlob){ toast('Record a video first','error'); return; }
-  const subjs=[...document.querySelectorAll('.subj-chip.selected')].map(e=>e.dataset.id);
-  if(!subjs.length){ toast('Select at least one subject','error'); return; }
+// ── Enrollment Submission ────────────────────────────────────────────────────
+async function submitEnrollment() {
+  const sid = document.getElementById('studentSelect').value;
+  if (!sid) { toast('Select a student', 'error'); return; }
+  if (!recordedBlob) { toast('Record a video first', 'error'); return; }
 
-  document.getElementById('trainingCard').style.display='block';
-  document.getElementById('resultCard').style.display='none';
+  // Collect selected subjects — stored in module scope so showResult can use them
+  const subjIds = [...document.querySelectorAll('.subj-chip.selected')].map(e => e.dataset.id);
+  if (!subjIds.length) { toast('Select at least one subject', 'error'); return; }
+
+  // Show pipeline card, reset state
+  document.getElementById('trainingCard').style.display = 'block';
+  document.getElementById('resultCard').style.display = 'none';
   resetPipeline();
-  // document.getElementById('btnEnroll').disabled=true;
-  document.getElementById('enrollIcon').innerHTML='<span class="spinner"></span>';
-  document.getElementById('enrollText').textContent='Training…';
-  document.getElementById('enrollStatus').textContent='Processing video…';
 
-  const pipePromise = animatePipeline();
-  const b64 = await blobToBase64(recordedBlob);
-  const result = await api('POST','/api/enroll',{
-    student_id:parseInt(sid),
-    subject_ids:subjs.map(Number),
-    video_b64:b64
-  });
-  await pipePromise;
+  setEnrollBtnState(true);
+  document.getElementById('enrollStatus').textContent = 'Processing video…';
 
+  try {
+    // Run animation and API call in parallel
+    const pipePromise = animatePipeline();
+    const b64 = await blobToBase64(recordedBlob);
+    const result = await api('POST', '/api/enroll', {
+      student_id: parseInt(sid),
+      subject_ids: subjIds.map(Number),
+      video_b64: b64,
+      recorded_duration: recDuration   // ← send real duration; webm container header is unreliable
+    });
 
-  document.getElementById('enrollText').textContent='Train & Enroll';
-  document.getElementById('enrollStatus').textContent='';
+    // Wait for animation to finish before showing result
+    await pipePromise;
 
-  if(result.error){
-    pipeSet('p-save','err','Failed — '+result.error);
-    toast(result.error,'error');
-    document.getElementById('btnEnroll').disabled=false;
-    return;
+    document.getElementById('enrollStatus').textContent = '';
+
+    if (result.error) {
+      pipeSet('p-save', 'err', 'Failed — ' + result.error);
+      toast(result.error, 'error');
+      setEnrollBtnState(false);
+      return;
+    }
+
+    pipeSet('p-save', 'done', 'Embeddings saved — face DB reloaded ✓');
+    showResult(result, subjIds.length);
+    toast(result.message || 'Enrollment complete!');
+    setTimeout(() => location.reload(), 4000);
+
+  } catch (err) {
+    // Catch any unexpected JS errors so the button isn't left in a broken state
+    console.error('Enrollment error:', err);
+    pipeSet('p-save', 'err', 'Unexpected error — check console');
+    toast('Unexpected error: ' + err.message, 'error');
+    setEnrollBtnState(false);
+    document.getElementById('enrollStatus').textContent = '';
   }
-
-  pipeSet('p-save','done','Embeddings saved — face DB reloaded ✓');
-  showResult(result);
-  toast(result.message || 'Enrollment complete!');
-  setTimeout(()=>location.reload(), 4000);
 }
 
-function showResult(r){
-  document.getElementById('resultCard').style.display='block';
-  const td=r.training_details||{};
-  document.getElementById('resultContent').innerHTML=`
+function showResult(r, subjCount) {
+  document.getElementById('resultCard').style.display = 'block';
+  const td = r.training_details || {};
+  document.getElementById('resultContent').innerHTML = `
     <div class="metric-row">
-      <div class="metric"><div class="v">${r.frame_count||0}</div><div class="l">Raw Frames</div></div>
-      <div class="metric"><div class="v" style="color:var(--accent2)">${r.augmented_count||0}</div><div class="l">Augmented<br>Variants</div></div>
-      <div class="metric"><div class="v" style="color:var(--green)">${r.total_samples||0}</div><div class="l">Total<br>Embeddings</div></div>
-      <div class="metric"><div class="v" style="color:var(--orange)">${Math.round((r.quality_avg||0)*100)}%</div><div class="l">Avg Quality</div></div>
+      <div class="metric"><div class="v">${r.frame_count || 0}</div><div class="l">Raw Frames</div></div>
+      <div class="metric"><div class="v" style="color:var(--accent2)">${r.augmented_count || 0}</div><div class="l">Augmented<br>Variants</div></div>
+      <div class="metric"><div class="v" style="color:var(--green)">${r.total_samples || 0}</div><div class="l">Total<br>Embeddings</div></div>
+      <div class="metric"><div class="v" style="color:var(--orange)">${Math.round((r.quality_avg || 0) * 100)}%</div><div class="l">Avg Quality</div></div>
     </div>
     <div style="padding:12px;background:rgba(16,185,129,0.09);border-radius:8px;border:1px solid rgba(16,185,129,0.25);font-size:13px;margin-bottom:10px">
       ✅ ${r.message}
     </div>
     <div style="font-size:12px;color:var(--muted);line-height:1.8">
-      <b>Model:</b> ${td.model_used||'ArcFace (buffalo_l)'}
-      &nbsp;·&nbsp;<b>Subjects:</b> ${r.subjects_enrolled||subjs.length}
+      <b>Model:</b> ${td.model_used || 'ArcFace (buffalo_l)'}
+      &nbsp;·&nbsp;<b>Subjects:</b> ${r.subjects_enrolled || subjCount}
     </div>
-    ${td.augmentations_applied?`
+    ${td.augmentations_applied ? `
     <div style="font-size:12px;color:var(--muted);margin-top:10px"><b>Augmentations applied:</b></div>
     <div class="aug-pills" style="margin-top:6px">
-      ${td.augmentations_applied.map(a=>`<span class="aug-pill">${a}</span>`).join('')}
-    </div>`:''}
+      ${td.augmentations_applied.map(a => `<span class="aug-pill">${a}</span>`).join('')}
+    </div>` : ''}
   `;
 }
 
-function blobToBase64(blob){
-  return new Promise(r=>{ const fr=new FileReader(); fr.onloadend=()=>r(fr.result.split(',')[1]); fr.readAsDataURL(blob); });
+// ── Utils ────────────────────────────────────────────────────────────────────
+function blobToBase64(blob) {
+  return new Promise(r => {
+    const fr = new FileReader();
+    fr.onloadend = () => r(fr.result.split(',')[1]);
+    fr.readAsDataURL(blob);
+  });
 }
 </script>
 {% endblock %}
